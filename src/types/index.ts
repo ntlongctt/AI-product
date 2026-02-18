@@ -70,7 +70,7 @@ export type AITask =
   | 'object-removal'
   | 'text-removal';
 
-export type AIProvider = 'fal' | 'replicate' | 'openai' | 'stability';
+export type AIProvider = 'gemini' | 'zai';
 
 export type GenerationStatus = 'pending' | 'processing' | 'completed' | 'failed';
 

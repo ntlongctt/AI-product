@@ -1,41 +1,41 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { generateImageSchema } from '@/lib/validations/ai';
+import { sceneGenSchema } from '@/lib/validations/ai';
 import { generateId } from '@/lib/utils';
 import { getJobStore } from '@/lib/ai/job-store';
 import { getAIService } from '@/lib/ai/service';
-import type { AITask } from '@/types';
 
+/**
+ * POST /api/ai/tasks/scene-gen
+ * Specialized endpoint for scene generation
+ * Accepts a product image and scene description, returns a job ID for polling
+ */
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json();
-    const validated = generateImageSchema.parse(body);
+    const validated = sceneGenSchema.parse(body);
 
     // Create job ID immediately
     const jobId = generateId();
-
     const jobStore = getJobStore();
 
     // Store initial job state
-    const job = await jobStore.create({
+    await jobStore.create({
       id: jobId,
       status: 'pending',
-      task: validated.task as AITask,
+      task: 'scene-gen',
       input: {
-        task: validated.task as AITask,
-        inputUrl: validated.inputUrl,
-        prompt: validated.prompt,
-        options: validated.options,
+        task: 'scene-gen',
+        inputUrl: validated.productImage,
+        prompt: validated.sceneDescription,
+        options: {
+          ...validated.options,
+          projectId: validated.projectId,
+        },
       },
     });
 
-    // TODO: Queue job for async processing via AI service
-    // The AI service will:
-    // 1. Update status to 'processing'
-    // 2. Call the appropriate provider
-    // 3. Update status to 'completed' with outputUrl or 'failed' with error
-
     // Start async processing (fire and forget)
-    processJobAsync(jobId, validated).catch(console.error);
+    processSceneGenJob(jobId, validated).catch(console.error);
 
     // Return job ID immediately for polling
     return NextResponse.json(
@@ -44,46 +44,50 @@ export async function POST(req: NextRequest) {
         data: {
           jobId,
           status: 'pending',
-          message: 'Job queued for processing',
+          task: 'scene-gen',
+          message: 'Scene generation job queued for processing',
         },
       },
       { status: 202 }
     );
   } catch (error) {
-    console.error('[AI Generate Error]', error);
+    console.error('[Scene Gen Error]', error);
 
     if (error instanceof Error && error.name === 'ZodError') {
-      return NextResponse.json({ success: false, error: 'Invalid input' }, { status: 400 });
+      return NextResponse.json(
+        { success: false, error: 'Invalid input', details: error.message },
+        { status: 400 }
+      );
     }
 
     return NextResponse.json(
-      { success: false, error: 'Failed to queue generation job' },
+      { success: false, error: 'Failed to queue scene generation job' },
       { status: 500 }
     );
   }
 }
 
-// Async job processor - integrates with AI service
-async function processJobAsync(
+// Async job processor for scene generation
+async function processSceneGenJob(
   jobId: string,
   validated: {
-    task: string;
-    inputUrl: string;
-    prompt?: string;
+    productImage: string;
+    sceneDescription: string;
+    projectId?: string;
     options?: Record<string, unknown>;
   }
 ) {
   const jobStore = getJobStore();
   const aiService = getAIService();
 
-  // Update status to processing
+  // Update to processing
   await jobStore.update(jobId, { status: 'processing' });
 
   try {
     const result = await aiService.generateSync({
-      task: validated.task as AITask,
-      inputUrl: validated.inputUrl,
-      prompt: validated.prompt,
+      task: 'scene-gen',
+      inputUrl: validated.productImage,
+      prompt: validated.sceneDescription,
       options: validated.options,
     });
 
@@ -101,14 +105,14 @@ async function processJobAsync(
     } else {
       await jobStore.update(jobId, {
         status: 'failed',
-        error: result.error || 'Processing failed',
+        error: result.error || 'Scene generation failed',
         completedAt: new Date(),
       });
     }
   } catch (error) {
     await jobStore.update(jobId, {
       status: 'failed',
-      error: error instanceof Error ? error.message : 'Processing failed',
+      error: error instanceof Error ? error.message : 'Scene generation failed',
       completedAt: new Date(),
     });
   }
